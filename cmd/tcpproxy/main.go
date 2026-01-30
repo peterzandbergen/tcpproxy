@@ -25,12 +25,12 @@ func runProxies(ctx context.Context, config *Config) error {
 	for _, proxyCfg := range config.Proxies {
 		// Create a config
 		cfg := proxy.ProxyConfig{
-			Name:       fmt.Sprintf("proxy-%s", proxyCfg.LocalPort),
+			Name:       fmt.Sprintf("%s:%s", proxyCfg.LocalPort, proxyCfg.RemoteAddr),
 			Port:       proxyCfg.LocalPort,
 			RemoteAddr: proxyCfg.RemoteAddr,
 		}
 		// Create a proxy
-		pr := proxy.NewProxy(cfg, proxy.WithLogger(slog.Default()))
+		pr := proxy.NewProxy(cfg)
 		proxies = append(proxies, pr)
 	}
 
@@ -82,7 +82,7 @@ func InitLogger(cfg *Config) *slog.Logger {
 
 func run(ctx context.Context, args []string, getenv func(string) string) error {
 	cfg := LoadConfig(args, getenv)
-	logger := InitLogger(cfg).With("application", "tcpproxy")
+	logger := InitLogger(cfg).With("application", "tcpproxy", "version", version)
 	slog.SetDefault(logger)
 
 	return runProxies(ctx, cfg)

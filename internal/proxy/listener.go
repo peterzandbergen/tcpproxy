@@ -6,30 +6,32 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"strconv"
 	"sync"
 )
 
 // ProxyConfig holds configuration for the proxy
 type ProxyConfig struct {
 	Name       string
-	ListenPort int
-	TargetHost string
-	TargetPort int
+	Port       string
+	RemoteAddr string
 }
 
 // Proxy accepts incoming connections and forwards them to the target service
 type Proxy struct {
 	name       string
-	port       int
-	targetHost string
-	targetPort int
+	port       string
+	remoteAddr string
 	logger     *slog.Logger
 	listener   net.Listener
 
 	bufferPool *BufferPool
 }
 
+func (p *Proxy) Name() string {
+	return p.name
+}
+
+// BufferPool is a pool of reusable byte buffers with a size of multipels of 1KB
 type BufferPool struct {
 	pool sync.Pool
 }
@@ -85,9 +87,8 @@ func WithBufferSize(size int) Option {
 func NewProxy(cfg ProxyConfig, opts ...Option) *Proxy {
 	p := &Proxy{
 		name:       cfg.Name,
-		port:       cfg.ListenPort,
-		targetHost: cfg.TargetHost,
-		targetPort: cfg.TargetPort,
+		port:       cfg.Port,
+		remoteAddr: cfg.RemoteAddr,
 		logger:     slog.Default().With("proxy", cfg.Name),
 		bufferPool: NewBufferPool(10 * 1024),
 	}
@@ -103,11 +104,13 @@ func NewProxy(cfg ProxyConfig, opts ...Option) *Proxy {
 func (p *Proxy) Start(ctx context.Context) error {
 	if p.listener == nil {
 		// Create a listener
-		l, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(p.port)))
+		hp := net.JoinHostPort("", p.port)
+		l, err := net.Listen("tcp", hp)
 		if err != nil {
 			return err
 		}
 		p.listener = l
+		p.logger.Info("created listener", "protocol", "tcp", "address", hp, "remoteAddr", p.remoteAddr)
 	}
 	// Close the listener when done
 	defer p.listener.Close()
@@ -138,14 +141,23 @@ func (p *Proxy) acceptLoop(ctx context.Context) error {
 
 	// Use wg to wait for the connection handlers to finish
 	var wg sync.WaitGroup
+	var connectionID int64
 	for {
 		conn, err := p.listener.Accept()
 		if err != nil {
-			// Listener closed or error occurred
+			p.logger.Info("stopping accept loop", "error", err)
 			break
 		}
+		connectionID++
+		p.logger.Info("accepted new connection", "connectionID", connectionID, "remoteAddr", conn.RemoteAddr().String())
 		wg.Go(func() {
-			p.handleConnection(ctx, conn)
+			if err := p.handleConnection(ctx, conn, connectionID); err != nil {
+				if isClientDisconnect(err) {
+					p.logger.Debug("connection closed by client", "error", err)
+				} else {
+					p.logger.Error("error handling connection", "error", err)
+				}
+			}
 		})
 	}
 
@@ -153,13 +165,16 @@ func (p *Proxy) acceptLoop(ctx context.Context) error {
 	return nil
 }
 
-func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn) error {
+func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int64) error {
 	defer conn.Close()
+
+	logger := p.logger.With("connectionID", connID, "remoteAddr", conn.RemoteAddr().String())
 
 	var dialer net.Dialer
 	// Create a client connection to the target service
-	client, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(p.targetHost, strconv.Itoa(p.targetPort)))
+	client, err := dialer.DialContext(ctx, "tcp", p.remoteAddr)
 	if err != nil {
+		logger.Error("failed to connect to target", "remoteAddr", p.remoteAddr, "error", err)
 		return err
 	}
 	defer client.Close()
@@ -172,13 +187,20 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn) error {
 	downDone := make(chan struct{})
 	wg.Go(func() {
 		defer close(downDone)
-		logger := p.logger.With("direction", "downstream")
+		logger := logger.With("direction", "downstream")
 		buf := p.bufferPool.Get()
 		defer p.bufferPool.Put(buf)
 		written, err := io.CopyBuffer(client, conn, buf)
 		if err != nil {
-			downErr = err
-			return
+			if isClientDisconnect(err) {
+				logger.Debug("client disconnected", "error", err)
+				return
+			}
+			if !errors.Is(err, net.ErrClosed) {
+				logger.Info("copy buffer stopped unexpectedly", "error", err)
+				upErr = err // or downErr
+				return
+			}
 		}
 		logger.Info("forwarded data", "bytes", written)
 	})
@@ -187,13 +209,20 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn) error {
 	upDone := make(chan struct{})
 	wg.Go(func() {
 		defer close(upDone)
-		logger := p.logger.With("direction", "upstream")
+		logger := logger.With("direction", "upstream")
 		buf := p.bufferPool.Get()
 		defer p.bufferPool.Put(buf)
 		written, err := io.CopyBuffer(conn, client, buf)
 		if err != nil {
-			upErr = err
-			return
+			if isClientDisconnect(err) {
+				logger.Debug("client disconnected", "error", err)
+				return
+			}
+			if !errors.Is(err, net.ErrClosed) {
+				logger.Info("copy buffer stopped unexpectedly", "error", err)
+				upErr = err // or downErr
+				return
+			}
 		}
 		logger.Info("forwarded data", "bytes", written)
 	})
@@ -208,96 +237,22 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn) error {
 		client.Close()
 	}
 
+	closeWrite := func(c net.Conn) {
+		if cw, ok := c.(interface{ CloseWrite() error }); ok {
+			cw.CloseWrite()
+		}
+	}
+
 	// Stop when context is done or one of the directions is done
 	select {
 	case <-ctx.Done():
 		closeAll()
 	case <-downDone:
-		closeAll()
+		closeWrite(client)
 	case <-upDone:
-		closeAll()
+		closeWrite(conn)
 	}
 	wg.Wait()
+
 	return errors.Join(downErr, upErr)
 }
-
-// type Listener struct {
-// 	listener net.Listener
-// }
-
-// type Handler struct {
-// 	conn net.Conn
-// }
-
-// func NewHandler(conn net.Conn) *Handler {
-// 	return &Handler{conn: conn}
-// }
-
-// func NewListener(l net.Listener) *Listener {
-// 	return &Listener{listener: l}
-// }
-
-// HandleAccept listens for new connections and starts a handler
-// for each accepted connection.
-// It stops listening when the context is cancelled, it also closes the listener.
-// func (l *Listener) HandleAccept(ctx context.Context) error {
-// 	defer func() {
-// 		if err := l.listener.Close(); err != nil {
-// 			// log the error
-// 		}
-// 	}()
-
-// 	var connChan = make(chan net.Conn, 1)
-// 	var acceptDone = make(chan struct{})
-// 	// Accept connections and send them to connChan
-// 	var acceptErr error
-// 	var wg sync.WaitGroup
-// 	wg.Go(func() {
-// 		for {
-// 			var conn net.Conn
-// 			conn, acceptErr = l.listener.Accept()
-// 			if acceptErr != nil {
-// 				close(acceptDone)
-// 				return
-// 			}
-// 			connChan <- conn
-// 		}
-// 	})
-
-// 	var doneErr error
-// LOOP:
-// 	for {
-// 		select {
-// 		// This also cancels the handlers
-// 		case <-ctx.Done():
-// 			doneErr = ctx.Err()
-// 			// close the listener
-// 			l.listener.Close()
-// 			// Wait for the handlers and the accept goroutine to finish
-// 			wg.Wait()
-// 			break LOOP
-// 		case <-acceptDone:
-// 			// Accept loop is done
-// 			// Wait for handlers to finish
-// 			wg.Wait()
-// 			break LOOP
-// 		case conn := <-connChan:
-// 			// Start a new handler
-// 			wg.Go(func() {
-// 				handler := NewHandler(conn)
-// 				handler.Handle(ctx)
-// 			})
-// 		}
-// 	}
-
-// 	// return any errors encountered
-// 	return errors.Join(acceptErr, doneErr)
-// }
-
-// func (h *Handler) Handle(ctx context.Context) {
-// 	// Placeholder for handling the connection
-// 	// Actual implementation would go here
-
-// 	// Set up a connection with the downstream service
-// 	defer h.conn.Close()
-// }

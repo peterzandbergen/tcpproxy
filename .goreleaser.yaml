@@ -62,6 +62,7 @@ changelog:
 
 release:
   replace_existing_artifacts: true
+  mode: replace
   footer: >-
 
     ---

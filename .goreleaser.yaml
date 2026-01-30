@@ -25,6 +25,17 @@ builds:
       - windows
       - darwin
 
+# This is where your snippet lives
+kos:
+  - repositories:
+      - ghcr.io/my-user/my-app
+    tags:
+      - latest
+      - "{{.Version}}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+
 archives:
   - formats: [tar.gz]
     # this name template makes the OS and Arch compatible with the results of `uname`.

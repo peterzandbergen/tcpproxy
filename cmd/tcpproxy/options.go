@@ -70,8 +70,7 @@ func LoadConfig(args []string, getenv func(string) string) *Config {
 
 	var envProxies ProxyList
 	if envProxyStr := getenv("TCPPROXY_PROXY"); envProxyStr != "" {
-		entries := strings.Split(envProxyStr, ",")
-		for _, entry := range entries {
+		for entry := range strings.SplitSeq(envProxyStr, ",") {
 			if err := envProxies.Set(strings.TrimSpace(entry)); err != nil {
 				fmt.Printf("Warning: Ignoring invalid env proxy '%s': %v\n", entry, err)
 			}
@@ -89,9 +88,9 @@ func LoadConfig(args []string, getenv func(string) string) *Config {
 
 	var flagProxies ProxyList
 
-	fs.StringVar(&cfg.LogLevel, "loglevel", cfg.LogLevel, "Log level [error, warn, info, debug]")
-	fs.StringVar(&cfg.LogFormat, "logformat", cfg.LogFormat, "Log format [json, text]")
-	fs.Var(&flagProxies, "proxy", "Proxy spec: port=remote-host:remote-port (can be repeated)")
+	fs.StringVar(&cfg.LogLevel, "loglevel", cfg.LogLevel, "Log level [error, warn, info, debug] TCPPROXY_LOGLEVEL")
+	fs.StringVar(&cfg.LogFormat, "logformat", cfg.LogFormat, "Log format [json, text] TCPPROXY_LOGFORMAT")
+	fs.Var(&flagProxies, "proxy", "Proxy spec: port=remote-host:remote-port (can be repeated) TCPPROXY_PROXY")
 
 	// Parse args. We assume args comes from os.Args, so args[0] is the program path.
 	// We must parse starting from args[1:].

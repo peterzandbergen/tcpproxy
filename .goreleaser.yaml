@@ -27,12 +27,15 @@ builds:
 
 # This is where your snippet lives
 kos:
-  - build: tcpproxy
+  - id: tcpproxy
+    build: tcpproxy
     repositories:
       - ghcr.io/peterzandbergen/tcpproxy
     tags:
       - latest
+      - "{{.Tag}}"
       - "{{.Version}}"
+    bare: true
     platforms:
       - linux/amd64
       - linux/arm64

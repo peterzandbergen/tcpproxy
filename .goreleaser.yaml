@@ -1,50 +1,42 @@
-# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
-version: 2
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
 
-project_name: tcpproxy
+# The lines below are called `modelines`. See `:help modeline`
+# Feel free to remove those if you don't want/need to use them.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
 
 before:
   hooks:
+    # You may remove this if you don't use go modules.
     - go mod tidy
+    # you may remove this if you don't need go generate
     - go generate ./...
 
 builds:
-  - id: tcpproxy
-    main: ./cmd/tcpproxy
-    binary: tcpproxy
-    env:
+  - env:
       - CGO_ENABLED=0
     goos:
       - linux
-      - darwin
       - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.Date}}
+      - darwin
 
 archives:
-  - id: default
-    format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - formats: [tar.gz]
+    # this name template makes the OS and Arch compatible with the results of `uname`.
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    # use zip for windows archives
     format_overrides:
       - goos: windows
-        format: zip
-    files:
-      - LICENSE*
-      - README*
-      - CHANGELOG*
-
-checksum:
-  name_template: "checksums.txt"
-  algorithm: sha256
-
-snapshot:
-  version_template: "{{ incpatch .Version }}-next"
+        formats: [zip]
 
 changelog:
   sort: asc
@@ -52,29 +44,10 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
-      - "^chore:"
-      - "^ci:"
-      - Merge pull request
-      - Merge branch
-
-dockers:
-  - image_templates:
-      - "ghcr.io/myhops/tcpproxy:{{ .Tag }}"
-      - "ghcr.io/myhops/tcpproxy:v{{ .Major }}"
-      - "ghcr.io/myhops/tcpproxy:v{{ .Major }}.{{ .Minor }}"
-      - "ghcr.io/myhops/tcpproxy:latest"
-    dockerfile: Dockerfile
-    build_flag_templates:
-      - "--pull"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--platform=linux/amd64"
 
 release:
-  github:
-    owner: myhops
-    name: tcpproxy
-  draft: false
-  prerelease: auto
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

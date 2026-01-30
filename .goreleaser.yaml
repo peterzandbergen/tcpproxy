@@ -36,6 +36,7 @@ kos:
     platforms:
       - linux/amd64
       - linux/arm64
+    sbom: none
 
 archives:
   - formats: [tar.gz]

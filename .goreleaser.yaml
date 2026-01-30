@@ -29,7 +29,7 @@ builds:
 kos:
   - build: tcpproxy
     repositories:
-      - ghcr.io/my-user/my-app
+      - ghcr.io/peterzandbergen/tcpproxy
     tags:
       - latest
       - "{{.Version}}"

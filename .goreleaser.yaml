@@ -27,7 +27,8 @@ builds:
 
 # This is where your snippet lives
 kos:
-  - repositories:
+  - build: tcpproxy
+    repositories:
       - ghcr.io/my-user/my-app
     tags:
       - latest

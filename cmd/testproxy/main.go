@@ -16,5 +16,5 @@ func main() {
 	p := proxy.NewProxy(cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	p.Start(ctx)
+	p.ListenAndServe(ctx)
 }

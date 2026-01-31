@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/myhops/tcpproxy/internal/proxy"
@@ -34,18 +33,8 @@ func runProxies(ctx context.Context, config *Config) error {
 		proxies = append(proxies, pr)
 	}
 
-	var wg sync.WaitGroup
-	// Start all proxies
-	for _, pr := range proxies {
-		p := pr
-		wg.Go(func() {
-			if err := p.Start(ctx); err != nil {
-				slog.Error("proxy stopped with error", "proxy", p, "error", err)
-			}
-		})
-	}
-	wg.Wait()
-	return nil
+	ps := proxy.NewProxies(proxies)
+	return ps.ListenAndServe(ctx)
 }
 
 func InitLogger(cfg *Config) *slog.Logger {
@@ -122,7 +111,7 @@ func main() {
 	case <-ctx.Done():
 		// We received a signal (Ctrl+C)
 		slog.Info("signal received, shutting down proxies...")
-		
+
 		// 4. Graceful Shutdown Timeout
 		// We now wait for runDone (the actual cleanup) with a timeout
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

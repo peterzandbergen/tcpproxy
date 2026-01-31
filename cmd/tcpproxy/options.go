@@ -15,9 +15,12 @@ type ProxyMapping struct {
 
 // Config holds the final application options
 type Config struct {
-	LogLevel  string
-	LogFormat string
-	Proxies   []ProxyMapping
+	LogLevel          string
+	LogFormat         string
+	Proxies           []ProxyMapping
+	TelemetryEnabled  bool
+	TelemetryEndpoint string
+	TelemetryExporter string
 }
 
 // ProxyList implements flag.Value to handle multiple --proxy flags
@@ -52,9 +55,10 @@ func (p *ProxyList) Set(value string) error {
 func LoadConfig(args []string, getenv func(string) string) (*Config, error) {
 	// 1. Initialize with Defaults
 	cfg := &Config{
-		LogLevel:  "info",
-		LogFormat: "text",
-		Proxies:   []ProxyMapping{},
+		LogLevel:          "info",
+		LogFormat:         "text",
+		Proxies:           []ProxyMapping{},
+		TelemetryExporter: "otlp",
 	}
 
 	// 2. Load Environment Variables
@@ -66,6 +70,16 @@ func LoadConfig(args []string, getenv func(string) string) (*Config, error) {
 	envLogFormat := getenv("TCPPROXY_LOGFORMAT")
 	if envLogFormat != "" {
 		cfg.LogFormat = envLogFormat
+	}
+
+	envTelEnabled := getenv("TCPPROXY_TELEMETRY_ENABLED")
+	if envTelEnabled == "true" || envTelEnabled == "1" {
+		cfg.TelemetryEnabled = true
+	}
+
+	envTelExporter := getenv("TCPPROXY_TELEMETRY_EXPORTER")
+	if envTelExporter != "" {
+		cfg.TelemetryExporter = envTelExporter
 	}
 
 	var envProxies ProxyList
@@ -90,6 +104,9 @@ func LoadConfig(args []string, getenv func(string) string) (*Config, error) {
 
 	fs.StringVar(&cfg.LogLevel, "loglevel", cfg.LogLevel, "Log level [error, warn, info, debug] TCPPROXY_LOGLEVEL")
 	fs.StringVar(&cfg.LogFormat, "logformat", cfg.LogFormat, "Log format [json, text, otel] TCPPROXY_LOGFORMAT")
+	fs.BoolVar(&cfg.TelemetryEnabled, "telemetry-enabled", cfg.TelemetryEnabled, "Enable OpenTelemetry (default false) TCPPROXY_TELEMETRY_ENABLED")
+	fs.StringVar(&cfg.TelemetryEndpoint, "telemetry-endpoint", cfg.TelemetryEndpoint, "OTLP collector endpoint (e.g., localhost:4317)")
+	fs.StringVar(&cfg.TelemetryExporter, "telemetry-exporter", cfg.TelemetryExporter, "Telemetry exporter [otlp, stdout] TCPPROXY_TELEMETRY_EXPORTER")
 	fs.Var(&flagProxies, "proxy", "Proxy spec: port=remote-host:remote-port (can be repeated) TCPPROXY_PROXY")
 
 	// Parse args. We assume args comes from os.Args, so args[0] is the program path.

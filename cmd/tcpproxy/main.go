@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/myhops/tcpproxy/internal/proxy"
+	"github.com/myhops/tcpproxy/internal/slogmulti"
+	tel "github.com/myhops/tcpproxy/internal/telemetry"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 )
 
@@ -56,29 +58,32 @@ func InitLogger(cfg *Config) *slog.Logger {
 		Level: level,
 	}
 
-	if strings.ToLower(cfg.LogFormat) == "otlp" {
-		return otelslog.NewLogger("tcpproxy")
-	}
-
-	// 2. Determine Format (JSON vs Text)
-	var handler slog.Handler
+	// 2. Determine stderr handler format (JSON vs Text)
+	var stderrHandler slog.Handler
 	if strings.ToLower(cfg.LogFormat) == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		stderrHandler = slog.NewJSONHandler(os.Stderr, opts)
 	} else {
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		stderrHandler = slog.NewTextHandler(os.Stderr, opts)
 	}
 
-	// 3. Create the Logger
-	logger := slog.New(handler)
+	// 3. If otel format, fanout to both stderr and otel
+	if strings.ToLower(cfg.LogFormat) == "otel" {
+		otelHandler := otelslog.NewHandler("tcpproxy")
+		return slog.New(slogmulti.New(stderrHandler, otelHandler))
+	}
 
-	return logger
+	return slog.New(stderrHandler)
 }
 
-func run(ctx context.Context, args []string, getenv func(string) string)  {
+func run(ctx context.Context, args []string, getenv func(string) string) {
+	// Set up a basic stderr logger for early startup errors
+	earlyLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	slog.SetDefault(earlyLogger)
+
 	// Handle --version flag early
 	if len(args) > 1 && (args[1] == "--version" || args[1] == "-v") {
 		printVersion()
-		return 
+		return
 	}
 
 	cfg, err := LoadConfig(args, getenv)
@@ -86,10 +91,46 @@ func run(ctx context.Context, args []string, getenv func(string) string)  {
 		slog.ErrorContext(ctx, "Error parsing flags", "error", err)
 		return
 	}
+
+	// Set up telemetry shutdown function (may be nil if telemetry disabled)
+	var shutdownTelemetry func(context.Context) error
+
+	if cfg.TelemetryEnabled {
+		telCfg := tel.Config{
+			ServiceName:    "tcpproxy",
+			ServiceVersion: version,
+			OTLPEndpoint:   cfg.TelemetryEndpoint,
+			EnableTraces:   true,
+			EnableMetrics:  true,
+			EnableLogs:     true,
+			UseStdout:      cfg.TelemetryExporter == "stdout",
+		}
+		_, shutdownTelemetry, err = tel.Setup(ctx, telCfg)
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to setup telemetry", "error", err)
+			return
+		}
+	}
+
+	// Ensure telemetry is shut down on exit
+	defer func() {
+		if shutdownTelemetry != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			slog.InfoContext(ctx, "Shutting down telemetry")
+			if err := shutdownTelemetry(shutdownCtx); err != nil {
+				slog.ErrorContext(ctx, "Telemetry shutdown error", "error", err)
+			}
+		}
+	}()
+
+	// Initialize the application logger
+	// When telemetry is enabled with stdout exporter, use otel logger format
+	// Otherwise, logs go to stderr (text or json format)
 	logger := InitLogger(cfg).With("application", "tcpproxy", "version", version)
 	slog.SetDefault(logger)
 
-	// create a signal aware context
+	// Create a signal aware context
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
@@ -111,7 +152,7 @@ func run(ctx context.Context, args []string, getenv func(string) string)  {
 		// We received a signal (Ctrl+C)
 		slog.InfoContext(ctx, "signal received, shutting down proxies...")
 
-		// 4. Graceful Shutdown Timeout
+		// Graceful Shutdown Timeout
 		// We now wait for runDone (the actual cleanup) with a timeout
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -132,5 +173,5 @@ func printVersion() {
 }
 
 func main() {
-	run(context.Background(),os.Args, os.Getenv)
+	run(context.Background(), os.Args, os.Getenv)
 }

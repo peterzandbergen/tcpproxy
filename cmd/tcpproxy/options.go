@@ -49,7 +49,7 @@ func (p *ProxyList) Set(value string) error {
 // LoadConfig reads configuration from Environment Variables and Command Line Flags.
 // args: should be os.Args (including the program name at index 0)
 // getenv: dependency injection for reading environment variables (usually os.Getenv)
-func LoadConfig(args []string, getenv func(string) string) *Config {
+func LoadConfig(args []string, getenv func(string) string) (*Config, error) {
 	// 1. Initialize with Defaults
 	cfg := &Config{
 		LogLevel:  "info",
@@ -89,7 +89,7 @@ func LoadConfig(args []string, getenv func(string) string) *Config {
 	var flagProxies ProxyList
 
 	fs.StringVar(&cfg.LogLevel, "loglevel", cfg.LogLevel, "Log level [error, warn, info, debug] TCPPROXY_LOGLEVEL")
-	fs.StringVar(&cfg.LogFormat, "logformat", cfg.LogFormat, "Log format [json, text] TCPPROXY_LOGFORMAT")
+	fs.StringVar(&cfg.LogFormat, "logformat", cfg.LogFormat, "Log format [json, text, otel] TCPPROXY_LOGFORMAT")
 	fs.Var(&flagProxies, "proxy", "Proxy spec: port=remote-host:remote-port (can be repeated) TCPPROXY_PROXY")
 
 	// Parse args. We assume args comes from os.Args, so args[0] is the program path.
@@ -99,7 +99,9 @@ func LoadConfig(args []string, getenv func(string) string) *Config {
 	if len(args) > 1 {
 		parseArgs = args[1:]
 	}
-	fs.Parse(parseArgs)
+	if err := fs.Parse(parseArgs); err != nil {
+		return nil, err
+	}
 
 	// 4. Reconciliation (Flag Priority > Env Priority)
 	if len(flagProxies) > 0 {
@@ -108,5 +110,5 @@ func LoadConfig(args []string, getenv func(string) string) *Config {
 		cfg.Proxies = envProxies
 	}
 
-	return cfg
+	return cfg, nil
 }

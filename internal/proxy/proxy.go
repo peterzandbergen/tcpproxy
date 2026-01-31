@@ -83,11 +83,11 @@ func (p *Proxy) ListenAndServe(ctx context.Context) error {
 			return err
 		}
 		p.listener = l
-		p.logger.Info("created listener", "protocol", "tcp", "address", hp, "remoteAddr", p.remoteAddr)
+		p.logger.InfoContext(ctx, "created listener", "protocol", "tcp", "address", hp, "remoteAddr", p.remoteAddr)
 	}
 	// Close the listener when done
 	defer func() {
-		p.closeListener(p.logger)
+		p.closeListener(ctx, p.logger)
 	}()
 
 	// Start an accept loop and wait for it to finish
@@ -98,10 +98,10 @@ func (p *Proxy) ListenAndServe(ctx context.Context) error {
 	return nil
 }
 
-func (p *Proxy) closeListener(logger *slog.Logger) {
+func (p *Proxy) closeListener(ctx context.Context, logger *slog.Logger) {
 	p.listenerCloseOnce.Do(func() {
 		if err := p.listener.Close(); err != nil {
-			logger.Error("error closing listener", "error", err)
+			logger.ErrorContext(ctx, "error closing listener", "error", err)
 		}
 	})
 }
@@ -117,9 +117,9 @@ func (p *Proxy) acceptLoop(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 		// Print the error
-		p.logger.Info("shutting down proxy listener", "reason", ctx.Err())
+		p.logger.InfoContext(ctx, "shutting down proxy listener", "reason", ctx.Err())
 		// Close the listener to stop accepting new connections
-		p.closeListener(p.logger)
+		p.closeListener(ctx, p.logger)
 	}()
 
 	// Use wg to wait for the connection handlers to finish
@@ -128,18 +128,18 @@ func (p *Proxy) acceptLoop(ctx context.Context) error {
 	for {
 		conn, err := p.listener.Accept()
 		if err != nil {
-			p.logger.Info("stopping accept loop", "error", err)
+			p.logger.InfoContext(ctx, "stopping accept loop", "error", err)
 			break
 		}
 		connectionID++
 		connID := connectionID
-		p.logger.Info("accepted new connection", "connectionID", connectionID, "remoteAddr", conn.RemoteAddr().String())
+		p.logger.InfoContext(ctx, "accepted new connection", "connectionID", connectionID, "remoteAddr", conn.RemoteAddr().String())
 		wg.Go(func() {
 			if err := p.handleConnection(ctx, conn, connID); err != nil {
 				if isClientDisconnect(err) {
-					p.logger.Debug("connection closed by client", "error", err)
+					p.logger.DebugContext(ctx, "connection closed by client", "error", err)
 				} else {
-					p.logger.Error("error handling connection", "error", err)
+					p.logger.ErrorContext(ctx, "error handling connection", "error", err)
 				}
 			}
 		})
@@ -153,7 +153,7 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int6
 	logger := p.logger.With("connectionID", connID, "remoteAddr", conn.RemoteAddr().String())
 	defer func() {
 		if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			logger.Error("error closing conn", "error", err)
+			logger.ErrorContext(ctx, "error closing conn", "error", err)
 		}
 	}()
 
@@ -161,12 +161,12 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int6
 	// Create a client connection to the target service
 	client, err := dialer.DialContext(ctx, "tcp", p.remoteAddr)
 	if err != nil {
-		logger.Error("failed to connect to target", "remoteAddr", p.remoteAddr, "error", err)
+		logger.ErrorContext(ctx, "failed to connect to target", "remoteAddr", p.remoteAddr, "error", err)
 		return err
 	}
 	defer func() {
 		if err := client.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			logger.Error("error closing client", "error", err)
+			logger.ErrorContext(ctx, "error closing client", "error", err)
 		}
 	}()
 
@@ -181,10 +181,10 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int6
 		defer p.bufferPool.Put(buf)
 		written, err := io.CopyBuffer(client, conn, *buf)
 		if err != nil {
-			logger.Debug("downstream copy stopped", "bytes", written, "error", err)
+			logger.DebugContext(ctx, "downstream copy stopped", "bytes", written, "error", err)
 			return
 		}
-		logger.Info("downstream complete", "bytes", written)
+		logger.InfoContext(ctx, "downstream complete", "bytes", written)
 	})
 
 	// Start a process that forwards data from client to conn
@@ -196,10 +196,10 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int6
 		defer p.bufferPool.Put(buf)
 		written, err := io.CopyBuffer(conn, client, *buf)
 		if err != nil {
-			logger.Debug("upstream copy stopped", "bytes", written, "error", err)
+			logger.DebugContext(ctx, "upstream copy stopped", "bytes", written, "error", err)
 			return
 		}
-		logger.Info("upstream complete", "bytes", written)
+		logger.InfoContext(ctx, "upstream complete", "bytes", written)
 	})
 
 	closeAll := func() {
@@ -210,7 +210,7 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int6
 	closeWrite := func(c net.Conn) {
 		if cw, ok := c.(interface{ CloseWrite() error }); ok {
 			if err := cw.CloseWrite(); err != nil {
-				logger.Error("closeWrite failed", "remote", c.RemoteAddr(), "error", err)
+				logger.ErrorContext(ctx, "closeWrite failed", "remote", c.RemoteAddr(), "error", err)
 			}
 		}
 	}

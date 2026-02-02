@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Integration tests with OTEL collector testcontainer (run with `-tags=integration`)
+- OpenTelemetry tracing for proxy connections:
+  - `handleConnection` span with connection attributes
+  - `dial` span for backend connection establishment
+  - `forward` spans for upstream/downstream data transfer
+- OpenTelemetry metrics for proxy:
+  - `proxy.connections.total` - Total connections accepted
+  - `proxy.connections.active` - Currently active connections
+  - `proxy.connection.duration` - Connection duration histogram
+  - `proxy.bytes.received` - Bytes received from clients
+  - `proxy.bytes.sent` - Bytes sent to clients
+  - `proxy.connections.errors` - Connection errors
 - Comprehensive `-h` usage output documenting all flags and environment variables
 - Support for `OTEL_SDK_DISABLED` environment variable per OpenTelemetry specification
 - Support for `OTEL_PROPAGATORS` environment variable (tracecontext, baggage, none)

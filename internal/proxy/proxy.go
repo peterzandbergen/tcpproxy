@@ -7,6 +7,12 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ProxyConfig holds configuration for the proxy
@@ -24,7 +30,18 @@ type Proxy struct {
 	logger     *slog.Logger
 	listener   net.Listener
 
-	bufferPool        *BufferPool
+	tracer     trace.Tracer
+	meter      metric.Meter
+	bufferPool *BufferPool
+
+	// Metrics instruments
+	connTotal      metric.Int64Counter
+	connActive     metric.Int64UpDownCounter
+	connDuration   metric.Float64Histogram
+	bytesReceived  metric.Int64Counter
+	bytesSent      metric.Int64Counter
+	connErrors     metric.Int64Counter
+
 	listenerCloseOnce sync.Once
 }
 
@@ -58,12 +75,61 @@ func WithBufferSize(size int) Option {
 
 // NewProxy creates a new Proxy instance with the given configuration and options
 func NewProxy(cfg ProxyConfig, opts ...Option) *Proxy {
+	const instrumentationName = "github.com/myhops/tcpproxy/internal/proxy"
+
 	p := &Proxy{
 		name:       cfg.Name,
 		port:       cfg.Port,
 		remoteAddr: cfg.RemoteAddr,
 		logger:     slog.Default().With("proxy", cfg.Name),
 		bufferPool: NewBufferPool(10 * 1024),
+		tracer:     otel.Tracer(instrumentationName),
+		meter:      otel.Meter(instrumentationName),
+	}
+
+	// Initialize metric instruments
+	var err error
+
+	p.connTotal, err = p.meter.Int64Counter("proxy.connections.total",
+		metric.WithDescription("Total number of connections accepted"),
+		metric.WithUnit("{connection}"))
+	if err != nil {
+		p.logger.Error("failed to create connTotal metric", "error", err)
+	}
+
+	p.connActive, err = p.meter.Int64UpDownCounter("proxy.connections.active",
+		metric.WithDescription("Number of currently active connections"),
+		metric.WithUnit("{connection}"))
+	if err != nil {
+		p.logger.Error("failed to create connActive metric", "error", err)
+	}
+
+	p.connDuration, err = p.meter.Float64Histogram("proxy.connection.duration",
+		metric.WithDescription("Duration of connections"),
+		metric.WithUnit("s"))
+	if err != nil {
+		p.logger.Error("failed to create connDuration metric", "error", err)
+	}
+
+	p.bytesReceived, err = p.meter.Int64Counter("proxy.bytes.received",
+		metric.WithDescription("Total bytes received from clients"),
+		metric.WithUnit("By"))
+	if err != nil {
+		p.logger.Error("failed to create bytesReceived metric", "error", err)
+	}
+
+	p.bytesSent, err = p.meter.Int64Counter("proxy.bytes.sent",
+		metric.WithDescription("Total bytes sent to clients"),
+		metric.WithUnit("By"))
+	if err != nil {
+		p.logger.Error("failed to create bytesSent metric", "error", err)
+	}
+
+	p.connErrors, err = p.meter.Int64Counter("proxy.connections.errors",
+		metric.WithDescription("Total number of connection errors"),
+		metric.WithUnit("{error}"))
+	if err != nil {
+		p.logger.Error("failed to create connErrors metric", "error", err)
 	}
 
 	for _, opt := range opts {
@@ -149,7 +215,83 @@ func (p *Proxy) acceptLoop(ctx context.Context) error {
 	return nil
 }
 
+// dial establishes a connection to the target address with tracing.
+func (p *Proxy) dial(ctx context.Context, network, address string) (net.Conn, error) {
+	ctx, span := p.tracer.Start(ctx, "dial",
+		trace.WithAttributes(
+			attribute.String("network", network),
+			attribute.String("address", address),
+		))
+	defer span.End()
+
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, network, address)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.SetAttributes(
+		attribute.String("local_addr", conn.LocalAddr().String()),
+		attribute.String("remote_addr", conn.RemoteAddr().String()),
+	)
+
+	return conn, nil
+}
+
+// forward forwards traffic from src to dst and records bytes written to bytesWritten.
+func (p *Proxy) forward(ctx context.Context, dst, src net.Conn, logger *slog.Logger, direction string, done chan struct{}, bytesWritten *int64) func() {
+	return func() {
+		ctx, span := p.tracer.Start(ctx, "forward",
+			trace.WithAttributes(
+				attribute.String("direction", direction),
+				attribute.String("src", src.RemoteAddr().String()),
+				attribute.String("dst", dst.RemoteAddr().String()),
+			))
+		defer span.End()
+		defer close(done)
+
+		buf := p.bufferPool.Get()
+		defer p.bufferPool.Put(buf)
+
+		written, err := io.CopyBuffer(dst, src, *buf)
+		*bytesWritten = written
+
+		span.SetAttributes(attribute.Int64("bytes.transferred", written))
+
+		if err != nil {
+			span.RecordError(err)
+			logger.DebugContext(ctx, "forward stopped", "bytes", written, "error", err)
+			return
+		}
+		logger.InfoContext(ctx, "forward complete", "bytes", written)
+	}
+}
+
 func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int64) error {
+	// Start a span for this connection
+	ctx, span := p.tracer.Start(ctx, "handleConnection",
+		trace.WithAttributes(
+			attribute.Int64("connection.id", connID),
+			attribute.String("connection.remote_addr", conn.RemoteAddr().String()),
+			attribute.String("proxy.name", p.name),
+			attribute.String("proxy.target", p.remoteAddr),
+		))
+	defer span.End()
+
+	// Record metrics
+	attrs := metric.WithAttributes(
+		attribute.String("proxy.name", p.name),
+		attribute.String("proxy.target", p.remoteAddr),
+	)
+	p.connTotal.Add(ctx, 1, attrs)
+	p.connActive.Add(ctx, 1, attrs)
+	start := time.Now()
+	defer func() {
+		p.connActive.Add(ctx, -1, attrs)
+		p.connDuration.Record(ctx, time.Since(start).Seconds(), attrs)
+	}()
+
 	logger := p.logger.With("connectionID", connID, "remoteAddr", conn.RemoteAddr().String())
 	defer func() {
 		if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
@@ -157,11 +299,12 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int6
 		}
 	}()
 
-	var dialer net.Dialer
 	// Create a client connection to the target service
-	client, err := dialer.DialContext(ctx, "tcp", p.remoteAddr)
+	client, err := p.dial(ctx, "tcp", p.remoteAddr)
 	if err != nil {
 		logger.ErrorContext(ctx, "failed to connect to target", "remoteAddr", p.remoteAddr, "error", err)
+		p.connErrors.Add(ctx, 1, attrs)
+		span.RecordError(err)
 		return err
 	}
 	defer func() {
@@ -172,35 +315,16 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int6
 
 	// wg for the two goroutines
 	var wg sync.WaitGroup
-	// Start a process that forwards data between conn and client
-	downDone := make(chan struct{})
-	wg.Go(func() {
-		defer close(downDone)
-		logger := logger.With("direction", "downstream")
-		buf := p.bufferPool.Get()
-		defer p.bufferPool.Put(buf)
-		written, err := io.CopyBuffer(client, conn, *buf)
-		if err != nil {
-			logger.DebugContext(ctx, "downstream copy stopped", "bytes", written, "error", err)
-			return
-		}
-		logger.InfoContext(ctx, "downstream complete", "bytes", written)
-	})
 
-	// Start a process that forwards data from client to conn
+	// Start a process that forwards data between conn and client, downstream (client -> target)
+	downDone := make(chan struct{})
+	var bytesDown int64
+	wg.Go(p.forward(ctx, client, conn, logger.With("direction", "downstream"), "downstream", downDone, &bytesDown))
+
+	// Start a process that forwards data from client to conn, upstream (target -> client)
 	upDone := make(chan struct{})
-	wg.Go(func() {
-		defer close(upDone)
-		logger := logger.With("direction", "upstream")
-		buf := p.bufferPool.Get()
-		defer p.bufferPool.Put(buf)
-		written, err := io.CopyBuffer(conn, client, *buf)
-		if err != nil {
-			logger.DebugContext(ctx, "upstream copy stopped", "bytes", written, "error", err)
-			return
-		}
-		logger.InfoContext(ctx, "upstream complete", "bytes", written)
-	})
+	var bytesUp int64
+	wg.Go(p.forward(ctx, conn, client, logger.With("direction", "upstream"), "upstream", upDone, &bytesUp))
 
 	closeAll := func() {
 		conn.Close()
@@ -225,6 +349,14 @@ func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int6
 		closeWrite(conn)
 	}
 	wg.Wait()
+
+	// Record bytes transferred
+	p.bytesReceived.Add(ctx, bytesDown, attrs)
+	p.bytesSent.Add(ctx, bytesUp, attrs)
+	span.SetAttributes(
+		attribute.Int64("bytes.received", bytesDown),
+		attribute.Int64("bytes.sent", bytesUp),
+	)
 
 	return nil
 }

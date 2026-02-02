@@ -1,3 +1,7 @@
+# Session Start
+
+**IMPORTANT: At the start of each session, read `transfer/LATEST.md` for context from previous work.**
+
 # Context
 
 * add code to setup opentelemetry for traces, metrics and logs in separate file in internal. Do not integrate it in the rest of the code yet (tcpproxy/main.go)
@@ -17,3 +21,9 @@
 
 ## Scripts
 * Always create scripts for sh, not bash
+
+## Session Start and Transfer
+* Read `transfer/LATEST.md` at the start of each session for context
+* Transfer documents are stored in `transfer/` with date-based names (e.g., `2026-02-02.md`)
+* `transfer/LATEST.md` symlink points to the most recent document
+* Create a new transfer document at the end of each session

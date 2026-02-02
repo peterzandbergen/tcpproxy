@@ -60,6 +60,9 @@ export TCPPROXY_TELEMETRY_EXPORTER=otlp
 export TCPPROXY_LOGFORMAT=otel
 export TCPPROXY_LOGLEVEL="${TCPPROXY_LOGLEVEL:-info}"
 
+# Experiment
+# export OTEL_SDK_DISABLED=true
+
 echo "Starting tcpproxy with OpenTelemetry..."
 echo "  Binary:   $BINARY"
 echo "  Endpoint: $OTEL_EXPORTER_OTLP_ENDPOINT"

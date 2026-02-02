@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Comprehensive `-h` usage output documenting all flags and environment variables
+- Support for `OTEL_SDK_DISABLED` environment variable per OpenTelemetry specification
+- Support for `OTEL_PROPAGATORS` environment variable (tracecontext, baggage, none)
+- `SDKDisabled()` helper function to check if telemetry is disabled
+- `NewPropagator()` function to create propagators from comma-separated list
 - OpenTelemetry support for traces, metrics, and logs
 - `--telemetry-enabled` flag to enable OpenTelemetry (default false)
 - `--telemetry-exporter` flag to select exporter [otlp, stdout] (default otlp)

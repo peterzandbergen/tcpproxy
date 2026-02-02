@@ -1,11 +1,21 @@
 package main
 
 import (
+	_ "embed"
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 )
+
+//go:embed usage.txt
+var usageText string
+
+// Usage prints the usage information to stderr.
+func Usage() {
+	fmt.Fprint(os.Stderr, usageText)
+}
 
 // ProxyMapping represents a single "port=remote:port" rule
 type ProxyMapping struct {
@@ -99,6 +109,7 @@ func LoadConfig(args []string, getenv func(string) string) (*Config, error) {
 	}
 
 	fs := flag.NewFlagSet(fsName, flag.ExitOnError)
+	fs.Usage = Usage
 
 	var flagProxies ProxyList
 

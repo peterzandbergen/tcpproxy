@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -70,6 +71,13 @@ func DefaultConfig(serviceName string) Config {
 	}
 }
 
+// SDKDisabled returns true if the OTEL_SDK_DISABLED environment variable
+// is set to "true" (case-insensitive), per the OpenTelemetry specification.
+// https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
+func SDKDisabled() bool {
+	return strings.EqualFold(os.Getenv("OTEL_SDK_DISABLED"), "true")
+}
+
 // Telemetry holds the initialized OpenTelemetry providers.
 type Telemetry struct {
 	TracerProvider *sdktrace.TracerProvider
@@ -81,7 +89,23 @@ type Telemetry struct {
 // It returns a Telemetry struct containing the providers and a shutdown function.
 // The shutdown function should be called when the application exits to ensure
 // all telemetry data is flushed.
+//
+// If the OTEL_SDK_DISABLED environment variable is set to "true", Setup returns
+// nil providers and a no-op shutdown function, per the OpenTelemetry specification.
+// Note: Propagators are always configured regardless of OTEL_SDK_DISABLED, as per spec.
 func Setup(ctx context.Context, cfg Config) (*Telemetry, func(context.Context) error, error) {
+	// Set up propagator for distributed tracing context.
+	// This is done before checking OTEL_SDK_DISABLED because the spec states:
+	// "This setting does not affect propagators configured through OTEL_PROPAGATORS."
+	// https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
+	prop := newPropagator()
+	otel.SetTextMapPropagator(prop)
+
+	// Check OTEL_SDK_DISABLED per OpenTelemetry specification.
+	if SDKDisabled() {
+		return nil, func(context.Context) error { return nil }, nil
+	}
+
 	var shutdownFuncs []func(context.Context) error
 	var tel Telemetry
 
@@ -109,10 +133,6 @@ func Setup(ctx context.Context, cfg Config) (*Telemetry, func(context.Context) e
 	if err != nil {
 		return handleErr(err)
 	}
-
-	// Set up propagator for distributed tracing context.
-	prop := newPropagator()
-	otel.SetTextMapPropagator(prop)
 
 	// Set up trace provider.
 	if cfg.EnableTraces {
@@ -171,11 +191,62 @@ func newResource(ctx context.Context, serviceName, serviceVersion string) (*reso
 }
 
 // newPropagator creates a composite propagator for distributed tracing.
+// It reads the OTEL_PROPAGATORS environment variable to determine which
+// propagators to use. If not set, defaults to "tracecontext,baggage".
+// Supported values: tracecontext, baggage, none.
+// Values are case-insensitive and deduplicated per the OpenTelemetry specification.
+// https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
 func newPropagator() propagation.TextMapPropagator {
-	return propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	)
+	envValue := os.Getenv("OTEL_PROPAGATORS")
+	if envValue == "" {
+		envValue = "tracecontext,baggage"
+	}
+	return NewPropagator(envValue)
+}
+
+// NewPropagator creates a TextMapPropagator from a comma-separated list of propagator names.
+// Supported values: tracecontext, baggage, none.
+// Values are case-insensitive and deduplicated.
+// Unknown propagator names are ignored.
+func NewPropagator(propagators string) propagation.TextMapPropagator {
+	names := strings.Split(propagators, ",")
+
+	// Deduplicate and normalize to lowercase.
+	seen := make(map[string]bool)
+	var unique []string
+	for _, name := range names {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		if !seen[name] {
+			seen[name] = true
+			unique = append(unique, name)
+		}
+	}
+
+	// If "none" is specified alone, return a no-op propagator.
+	if len(unique) == 1 && unique[0] == "none" {
+		return propagation.NewCompositeTextMapPropagator()
+	}
+
+	var props []propagation.TextMapPropagator
+	for _, name := range unique {
+		switch name {
+		case "tracecontext":
+			props = append(props, propagation.TraceContext{})
+		case "baggage":
+			props = append(props, propagation.Baggage{})
+		case "none":
+			// Ignored when combined with other propagators.
+		}
+	}
+
+	if len(props) == 0 {
+		return propagation.NewCompositeTextMapPropagator()
+	}
+
+	return propagation.NewCompositeTextMapPropagator(props...)
 }
 
 // newTracerProvider creates a trace provider with either OTLP gRPC or stdout exporter.

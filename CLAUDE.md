@@ -4,6 +4,7 @@
 
 ## Build instructions
 * Use goreleaser release --clean --snapshot to build the executable
+* Alternatively build with -o under /tmp
 * The executable is under dist
 * Select the correct os and cpu for the system you are on when running the executable
 

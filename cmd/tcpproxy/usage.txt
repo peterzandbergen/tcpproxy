@@ -1,0 +1,54 @@
+Usage: tcpproxy [options]
+
+A simple TCP proxy with OpenTelemetry support.
+
+Options:
+  -proxy value
+        Proxy spec: port=remote-host:remote-port (can be repeated)
+  -loglevel string
+        Log level [error, warn, info, debug] (default "info")
+  -logformat string
+        Log format [json, text, otel] (default "text")
+  -telemetry-enabled
+        Enable OpenTelemetry (default false)
+  -telemetry-endpoint string
+        OTLP collector endpoint (e.g., localhost:4317)
+  -telemetry-exporter string
+        Telemetry exporter [otlp, stdout] (default "otlp")
+  -version, -v
+        Print version information and exit
+
+Application Environment Variables:
+  TCPPROXY_LOGLEVEL            Log level [error, warn, info, debug] (default "info")
+  TCPPROXY_LOGFORMAT           Log format [json, text, otel] (default "text")
+  TCPPROXY_PROXY               Proxy specs, comma-separated (e.g., "8080=localhost:80,8443=localhost:443")
+  TCPPROXY_TELEMETRY_ENABLED   Enable OpenTelemetry [true, 1] (default false)
+  TCPPROXY_TELEMETRY_EXPORTER  Telemetry exporter [otlp, stdout] (default "otlp")
+
+OpenTelemetry SDK Environment Variables:
+  OTEL_SDK_DISABLED            Disable SDK, returns no-op providers [true] (default false)
+  OTEL_PROPAGATORS             Propagators [tracecontext, baggage, none] (default "tracecontext,baggage")
+  OTEL_SERVICE_NAME            Override service name for telemetry
+  OTEL_RESOURCE_ATTRIBUTES     Resource attributes (key=value,key=value)
+
+OpenTelemetry OTLP Exporter Environment Variables:
+  OTEL_EXPORTER_OTLP_ENDPOINT            Target endpoint (default "localhost:4317" for gRPC)
+  OTEL_EXPORTER_OTLP_HEADERS             Request headers (key=value,key=value)
+  OTEL_EXPORTER_OTLP_TIMEOUT             Export timeout (default "10s")
+  OTEL_EXPORTER_OTLP_COMPRESSION         Compression [gzip, none]
+  OTEL_EXPORTER_OTLP_INSECURE            Disable TLS [true, false] (default false)
+  OTEL_EXPORTER_OTLP_CERTIFICATE         Path to TLS certificate
+  OTEL_EXPORTER_OTLP_CLIENT_KEY          Path to client private key (mTLS)
+  OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE  Path to client certificate (mTLS)
+
+Signal-specific OTLP variables (override general settings):
+  Replace OTLP with OTLP_TRACES, OTLP_METRICS, or OTLP_LOGS
+  Example: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=localhost:4317
+
+Examples:
+  tcpproxy -proxy 8080=localhost:80
+  tcpproxy -proxy 8080=localhost:80 -proxy 8443=localhost:443
+  tcpproxy -proxy 8080=localhost:80 -telemetry-enabled -loglevel debug
+
+  TCPPROXY_PROXY=8080=localhost:80 tcpproxy
+  OTEL_EXPORTER_OTLP_ENDPOINT=collector:4317 tcpproxy -proxy 8080=localhost:80 -telemetry-enabled

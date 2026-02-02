@@ -13,4 +13,6 @@
 
 ## Version Control
 * Use jj version 0.37.0-11
-* 
+
+## Scripts
+* Always create scripts for sh, not bash

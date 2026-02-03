@@ -40,8 +40,18 @@ func runProxies(ctx context.Context, config *Config) error {
 	return ps.ListenAndServe(ctx)
 }
 
+// InitLogger returns a logger that logs to stderr and to otel.
+//
+// When cfg.TelemetryEnabled and cfg.TelemetryExporter == "stdout",
+// then normal slog logger is disabled.
+// When cfg.TelemetryEnabled and cfg.TelemetryExporter != "stdout",
+// then normal slog logger is enabled.
 func InitLogger(cfg *Config) *slog.Logger {
-	// 1. Determine Level
+	// When telemetry uses stdout exporter, only use otel logger
+	if cfg.TelemetryEnabled && cfg.TelemetryExporter == "stdout" {
+		return slog.New(otelslog.NewHandler("tcpproxy"))
+	}
+
 	var level slog.Level
 	switch strings.ToLower(cfg.LogLevel) {
 	case "debug":
@@ -54,11 +64,8 @@ func InitLogger(cfg *Config) *slog.Logger {
 		level = slog.LevelInfo
 	}
 
-	opts := &slog.HandlerOptions{
-		Level: level,
-	}
+	opts := &slog.HandlerOptions{Level: level}
 
-	// 2. Determine stderr handler format (JSON vs Text)
 	var stderrHandler slog.Handler
 	if strings.ToLower(cfg.LogFormat) == "json" {
 		stderrHandler = slog.NewJSONHandler(os.Stderr, opts)
@@ -66,8 +73,8 @@ func InitLogger(cfg *Config) *slog.Logger {
 		stderrHandler = slog.NewTextHandler(os.Stderr, opts)
 	}
 
-	// 3. If otel format, fanout to both stderr and otel
-	if strings.ToLower(cfg.LogFormat) == "otel" {
+	// When telemetry uses OTLP exporter, fanout to both stderr and otel
+	if cfg.TelemetryEnabled {
 		otelHandler := otelslog.NewHandler("tcpproxy")
 		return slog.New(slogmulti.New(stderrHandler, otelHandler))
 	}
@@ -125,8 +132,6 @@ func run(ctx context.Context, args []string, getenv func(string) string) {
 	}()
 
 	// Initialize the application logger
-	// When telemetry is enabled with stdout exporter, use otel logger format
-	// Otherwise, logs go to stderr (text or json format)
 	logger := InitLogger(cfg).With("application", "tcpproxy", "version", version)
 	slog.SetDefault(logger)
 

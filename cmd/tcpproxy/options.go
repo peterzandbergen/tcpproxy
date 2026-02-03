@@ -114,7 +114,7 @@ func LoadConfig(args []string, getenv func(string) string) (*Config, error) {
 	var flagProxies ProxyList
 
 	fs.StringVar(&cfg.LogLevel, "loglevel", cfg.LogLevel, "Log level [error, warn, info, debug] TCPPROXY_LOGLEVEL")
-	fs.StringVar(&cfg.LogFormat, "logformat", cfg.LogFormat, "Log format [json, text, otel] TCPPROXY_LOGFORMAT")
+	fs.StringVar(&cfg.LogFormat, "logformat", cfg.LogFormat, "Log format [json, text] TCPPROXY_LOGFORMAT")
 	fs.BoolVar(&cfg.TelemetryEnabled, "telemetry-enabled", cfg.TelemetryEnabled, "Enable OpenTelemetry (default false) TCPPROXY_TELEMETRY_ENABLED")
 	fs.StringVar(&cfg.TelemetryEndpoint, "telemetry-endpoint", cfg.TelemetryEndpoint, "OTLP collector endpoint (e.g., localhost:4317)")
 	fs.StringVar(&cfg.TelemetryExporter, "telemetry-exporter", cfg.TelemetryExporter, "Telemetry exporter [otlp, stdout] TCPPROXY_TELEMETRY_EXPORTER")

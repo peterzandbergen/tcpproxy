@@ -104,7 +104,7 @@ func run(ctx context.Context, args []string, getenv func(string) string) {
 
 	if cfg.TelemetryEnabled {
 		telCfg := tel.Config{
-			ServiceName:    "tcpproxy",
+			// ServiceName:    "tcpproxy",
 			ServiceVersion: version,
 			OTLPEndpoint:   cfg.TelemetryEndpoint,
 			EnableTraces:   true,

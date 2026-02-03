@@ -8,7 +8,7 @@ Options:
   -loglevel string
         Log level [error, warn, info, debug] (default "info")
   -logformat string
-        Log format [json, text, otel] (default "text")
+        Log format [json, text] (default "text")
   -telemetry-enabled
         Enable OpenTelemetry (default false)
   -telemetry-endpoint string
@@ -20,10 +20,18 @@ Options:
 
 Application Environment Variables:
   TCPPROXY_LOGLEVEL            Log level [error, warn, info, debug] (default "info")
-  TCPPROXY_LOGFORMAT           Log format [json, text, otel] (default "text")
+  TCPPROXY_LOGFORMAT           Log format [json, text] (default "text")
   TCPPROXY_PROXY               Proxy specs, comma-separated (e.g., "8080=localhost:80,8443=localhost:443")
   TCPPROXY_TELEMETRY_ENABLED   Enable OpenTelemetry [true, 1] (default false)
   TCPPROXY_TELEMETRY_EXPORTER  Telemetry exporter [otlp, stdout] (default "otlp")
+
+Logging Behavior:
+  When telemetry is disabled:
+    Logs go to stderr (text or json format based on -logformat)
+  When telemetry is enabled with stdout exporter:
+    Logs go only via OpenTelemetry to stdout (stderr logging disabled)
+  When telemetry is enabled with otlp exporter:
+    Logs go to both stderr and OpenTelemetry
 
 OpenTelemetry SDK Environment Variables:
   OTEL_SDK_DISABLED            Disable SDK, returns no-op providers [true] (default false)

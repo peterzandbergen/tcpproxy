@@ -217,7 +217,7 @@ func (p *Proxy) acceptLoop(ctx context.Context) error {
 
 // dial establishes a connection to the target address with tracing.
 func (p *Proxy) dial(ctx context.Context, network, address string) (net.Conn, error) {
-	ctx, span := p.tracer.Start(ctx, "dial",
+	ctx, span := p.tracer.Start(ctx, "dial server",
 		trace.WithAttributes(
 			attribute.String("network", network),
 			attribute.String("address", address),
@@ -242,7 +242,7 @@ func (p *Proxy) dial(ctx context.Context, network, address string) (net.Conn, er
 // forward forwards traffic from src to dst and records bytes written to bytesWritten.
 func (p *Proxy) forward(ctx context.Context, dst, src net.Conn, logger *slog.Logger, direction string, done chan struct{}, bytesWritten *int64) func() {
 	return func() {
-		ctx, span := p.tracer.Start(ctx, "forward",
+		ctx, span := p.tracer.Start(ctx, "forward traffic",
 			trace.WithAttributes(
 				attribute.String("direction", direction),
 				attribute.String("src", src.RemoteAddr().String()),
@@ -270,7 +270,7 @@ func (p *Proxy) forward(ctx context.Context, dst, src net.Conn, logger *slog.Log
 
 func (p *Proxy) handleConnection(ctx context.Context, conn net.Conn, connID int64) error {
 	// Start a span for this connection
-	ctx, span := p.tracer.Start(ctx, "handleConnection",
+	ctx, span := p.tracer.Start(ctx, "handle connection",
 		trace.WithAttributes(
 			attribute.Int64("connection.id", connID),
 			attribute.String("connection.remote_addr", conn.RemoteAddr().String()),

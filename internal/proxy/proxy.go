@@ -35,12 +35,12 @@ type Proxy struct {
 	bufferPool *BufferPool
 
 	// Metrics instruments
-	connTotal      metric.Int64Counter
-	connActive     metric.Int64UpDownCounter
-	connDuration   metric.Float64Histogram
-	bytesReceived  metric.Int64Counter
-	bytesSent      metric.Int64Counter
-	connErrors     metric.Int64Counter
+	connTotal     metric.Int64Counter
+	connActive    metric.Int64UpDownCounter
+	connDuration  metric.Float64Histogram
+	bytesReceived metric.Int64Counter
+	bytesSent     metric.Int64Counter
+	connErrors    metric.Int64Counter
 
 	listenerCloseOnce sync.Once
 }

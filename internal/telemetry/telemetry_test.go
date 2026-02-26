@@ -153,69 +153,69 @@ func TestSetup_SDKDisabled_PropagatorsStillConfigured(t *testing.T) {
 
 func TestNewPropagator(t *testing.T) {
 	tests := []struct {
-		name       string
+		name        string
 		propagators string
-		wantFields int // Number of propagators in composite (0 means no-op)
+		wantFields  int // Number of propagators in composite (0 means no-op)
 	}{
 		{
-			name:       "default tracecontext and baggage",
+			name:        "default tracecontext and baggage",
 			propagators: "tracecontext,baggage",
-			wantFields: 2,
+			wantFields:  2,
 		},
 		{
-			name:       "tracecontext only",
+			name:        "tracecontext only",
 			propagators: "tracecontext",
-			wantFields: 1,
+			wantFields:  1,
 		},
 		{
-			name:       "baggage only",
+			name:        "baggage only",
 			propagators: "baggage",
-			wantFields: 1,
+			wantFields:  1,
 		},
 		{
-			name:       "none returns empty",
+			name:        "none returns empty",
 			propagators: "none",
-			wantFields: 0,
+			wantFields:  0,
 		},
 		{
-			name:       "case insensitive",
+			name:        "case insensitive",
 			propagators: "TRACECONTEXT,BAGGAGE",
-			wantFields: 2,
+			wantFields:  2,
 		},
 		{
-			name:       "mixed case",
+			name:        "mixed case",
 			propagators: "TraceContext,Baggage",
-			wantFields: 2,
+			wantFields:  2,
 		},
 		{
-			name:       "deduplication",
+			name:        "deduplication",
 			propagators: "tracecontext,tracecontext,baggage,baggage",
-			wantFields: 2,
+			wantFields:  2,
 		},
 		{
-			name:       "whitespace trimmed",
+			name:        "whitespace trimmed",
 			propagators: " tracecontext , baggage ",
-			wantFields: 2,
+			wantFields:  2,
 		},
 		{
-			name:       "unknown propagator ignored",
+			name:        "unknown propagator ignored",
 			propagators: "tracecontext,unknown,baggage",
-			wantFields: 2,
+			wantFields:  2,
 		},
 		{
-			name:       "empty string",
+			name:        "empty string",
 			propagators: "",
-			wantFields: 0,
+			wantFields:  0,
 		},
 		{
-			name:       "only unknown",
+			name:        "only unknown",
 			propagators: "unknown",
-			wantFields: 0,
+			wantFields:  0,
 		},
 		{
-			name:       "none with others ignores none",
+			name:        "none with others ignores none",
 			propagators: "tracecontext,none,baggage",
-			wantFields: 2,
+			wantFields:  2,
 		},
 	}
 
